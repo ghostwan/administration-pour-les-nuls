@@ -118,14 +118,13 @@ class NotificationHelper @Inject constructor(
                 .setContentTitle("Créneaux disponibles !")
                 .setContentText(summaryText)
                 .setStyle(
-                    NotificationCompat.InboxStyle()
-                        .setBigContentTitle("${slots.size} créneaux trouvés")
-                        .apply {
-                            groupedByMairie.forEach { (mairie, mairieSlots) ->
-                                addLine("$mairie : ${mairieSlots.size} créneau(x)")
-                            }
+                    NotificationCompat.InboxStyle().also { style ->
+                        style.setBigContentTitle("${slots.size} créneaux trouvés")
+                        groupedByMairie.forEach { (mairie, mairieSlots) ->
+                            style.addLine("$mairie : ${mairieSlots.size} créneau(x)")
                         }
-                        .setSummaryText("Appuyez pour voir les détails")
+                        style.setSummaryText("Appuyez pour voir les détails")
+                    }
                 )
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)

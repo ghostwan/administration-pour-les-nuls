@@ -356,7 +356,7 @@ private fun AddressSearchSection(
                                 }
                             }
                         }
-                        HorizontalDivider()
+                        Divider()
                     }
                 }
             }
@@ -406,15 +406,14 @@ private fun ReasonSection(
             fontWeight = FontWeight.Bold
         )
         Spacer(modifier = Modifier.height(8.dp))
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            AppointmentReason.entries.forEachIndexed { index, reason ->
-                SegmentedButton(
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AppointmentReason.entries.forEach { reason ->
+                FilterChip(
                     selected = selectedReason == reason,
                     onClick = { onReasonChanged(reason) },
-                    shape = SegmentedButtonDefaults.itemShape(
-                        index = index,
-                        count = AppointmentReason.entries.size
-                    ),
                     label = {
                         Text(
                             text = when (reason) {
