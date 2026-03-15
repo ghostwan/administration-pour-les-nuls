@@ -175,12 +175,22 @@ data class FoundSlot(
 
 /**
  * Response from POST /api/send_antibot_info
+ * API wraps responses in {"status_code": ..., "response_body": {...}}
  */
 data class AntibotInfoResponse(
+    @SerializedName("status_code")
+    val statusCode: Int,
+    @SerializedName("response_body")
+    val responseBody: AntibotInfoBody
+)
+
+data class AntibotInfoBody(
     @SerializedName("antibotId")
     val antibotId: String,
     @SerializedName("requestId")
-    val requestId: String
+    val requestId: String,
+    @SerializedName("antibotResult")
+    val antibotResult: String? = null
 )
 
 /**

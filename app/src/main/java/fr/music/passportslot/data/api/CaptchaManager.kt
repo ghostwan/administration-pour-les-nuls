@@ -11,12 +11,13 @@ import javax.inject.Singleton
  * 1. POST /api/send_antibot_info → {antibotId, requestId}
  * 2. User solves captcha in WebView → cookie is set
  * 3. POST /api/initCaptchaJWT → {access_token} (the captcha JWT)
- * 4. GET /api/validateCaptchaJWT?token=<jwt> → 200 OK
+ * 4. POST /api/validateCaptchaJWT?token=<jwt> → 200 OK
  * 5. JWT is sent as antibot_token in WebSocket messages
  */
 @Singleton
 class CaptchaManager @Inject constructor(
-    private val antsApiService: AntsApiService
+    private val antsApiService: AntsApiService,
+    private val authManager: AuthManager
 ) {
     companion object {
         private const val TAG = "CaptchaManager"
@@ -52,10 +53,11 @@ class CaptchaManager @Inject constructor(
     suspend fun requestAntibotInfo(): AntibotInfo {
         try {
             val response = antsApiService.sendAntibotInfo(antibotId = currentAntibotId)
-            currentAntibotId = response.antibotId
-            currentRequestId = response.requestId
-            Log.d(TAG, "Got antibot info: antibotId=${response.antibotId}, requestId=${response.requestId}")
-            return AntibotInfo(response.antibotId, response.requestId)
+            val body = response.responseBody
+            currentAntibotId = body.antibotId
+            currentRequestId = body.requestId
+            Log.d(TAG, "Got antibot info: antibotId=${body.antibotId}, requestId=${body.requestId}")
+            return AntibotInfo(body.antibotId, body.requestId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get antibot info", e)
             throw e
@@ -69,7 +71,8 @@ class CaptchaManager @Inject constructor(
      */
     suspend fun initCaptchaJwt(): String {
         try {
-            val response = antsApiService.initCaptchaJwt()
+            val authHeader = authManager.getAuthHeader()
+            val response = antsApiService.initCaptchaJwt(authHeader)
             val jwt = response.accessToken
             Log.d(TAG, "Got captcha JWT: ${jwt.take(20)}...")
             return jwt
@@ -84,7 +87,8 @@ class CaptchaManager @Inject constructor(
      */
     suspend fun validateAndStoreJwt(jwt: String): Boolean {
         try {
-            val response = antsApiService.validateCaptchaJwt(jwt)
+            val authHeader = authManager.getAuthHeader()
+            val response = antsApiService.validateCaptchaJwt(authHeader, jwt)
             if (response.isSuccessful) {
                 captchaJwt = jwt
                 jwtTimestamp = System.currentTimeMillis()

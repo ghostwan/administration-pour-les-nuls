@@ -57,13 +57,17 @@ interface AntsApiService {
      * Step 2 of captcha flow: exchange solved captcha for a JWT.
      */
     @POST("initCaptchaJWT")
-    suspend fun initCaptchaJwt(): CaptchaJwtResponse
+    suspend fun initCaptchaJwt(
+        @Header("Authorization") authHeader: String
+    ): CaptchaJwtResponse
 
     /**
      * Step 3 of captcha flow: validate the captcha JWT.
+     * NOTE: This is a POST endpoint, not GET (GET returns 405).
      */
-    @GET("validateCaptchaJWT")
+    @POST("validateCaptchaJWT")
     suspend fun validateCaptchaJwt(
+        @Header("Authorization") authHeader: String,
         @Query("token") token: String
     ): Response<ResponseBody>
 }

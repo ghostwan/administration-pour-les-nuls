@@ -16,15 +16,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import fr.music.passportslot.util.Constants
 
 /**
- * Screen that displays a WebView for the user to solve the LiveIdentity captcha.
+ * Screen that loads the real ANTS website in a WebView so the user can solve
+ * the LiveIdentity captcha in a genuine browser environment.
  *
- * The approach:
- * 1. Load a minimal HTML page that includes the LiveIdentity antibot script
- * 2. Initialize the captcha widget with antibotId/requestId from the ANTS API
- * 3. User solves the captcha (QUESTION type)
- * 4. Poll for the captcha token in the hidden input field
- * 5. Once obtained, call initCaptchaJWT + validateCaptchaJWT via the ViewModel
- * 6. Navigate back with success
+ * We inject JavaScript to intercept the XHR response from initCaptchaJWT,
+ * which contains the captcha JWT. Once captured, we store it in our
+ * CaptchaManager and navigate back.
+ *
+ * This approach avoids LiveIdentity bot detection that occurs when loading
+ * custom HTML pages in a WebView.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,6 +48,7 @@ fun CaptchaScreen(
                 title = { Text("Verification de securite") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
+                        @Suppress("DEPRECATION")
                         Icon(Icons.Default.ArrowBack, contentDescription = "Retour")
                     }
                 },
@@ -65,17 +66,6 @@ fun CaptchaScreen(
                 .padding(paddingValues)
         ) {
             when {
-                uiState.isLoading -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Chargement du captcha...")
-                    }
-                }
                 uiState.error != null -> {
                     Column(
                         modifier = Modifier
@@ -102,16 +92,34 @@ fun CaptchaScreen(
                         }
                     }
                 }
-                uiState.antibotId != null -> {
-                    CaptchaWebView(
-                        antibotId = uiState.antibotId!!,
-                        requestId = uiState.requestId!!,
-                        onCaptchaTokenObtained = { token ->
-                            viewModel.onCaptchaTokenObtained(token)
+                else -> {
+                    // Show the real ANTS website in a WebView
+                    AntsWebView(
+                        onCaptchaJwtCaptured = { jwt ->
+                            viewModel.onCaptchaJwtCaptured(jwt)
                         }
                     )
 
-                    // Show processing overlay
+                    // Loading indicator overlay
+                    if (uiState.isLoading) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Card {
+                                Column(
+                                    modifier = Modifier.padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator()
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Chargement du site ANTS...")
+                                }
+                            }
+                        }
+                    }
+
+                    // Show processing overlay when validating JWT
                     if (uiState.isProcessingToken) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -137,16 +145,10 @@ fun CaptchaScreen(
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun CaptchaWebView(
-    antibotId: String,
-    requestId: String,
-    onCaptchaTokenObtained: (String) -> Unit
+private fun AntsWebView(
+    onCaptchaJwtCaptured: (String) -> Unit
 ) {
-    var tokenPollingActive by remember { mutableStateOf(true) }
-
-    val captchaHtml = remember(antibotId, requestId) {
-        buildCaptchaHtml(antibotId, requestId)
-    }
+    var pageLoaded by remember { mutableStateOf(false) }
 
     AndroidView(
         factory = { context ->
@@ -154,138 +156,169 @@ private fun CaptchaWebView(
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                settings.databaseEnabled = true
+                settings.javaScriptCanOpenWindowsAutomatically = true
+                settings.setSupportMultipleWindows(false)
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
 
-                // Enable cookies
+                // Enable cookies (important for LiveIdentity)
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                // Add JavaScript interface to receive the JWT from injected JS
+                addJavascriptInterface(
+                    CaptchaJsBridge(onCaptchaJwtCaptured),
+                    "AndroidBridge"
+                )
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        // Start polling for the captcha token
-                        if (tokenPollingActive) {
-                            pollForToken(view, onCaptchaTokenObtained) {
-                                tokenPollingActive = false
-                            }
+                        pageLoaded = true
+                        // Inject our XHR interceptor to capture initCaptchaJWT response
+                        view?.evaluateJavascript(buildInterceptorJs(), null)
+                        Log.d("CaptchaWebView", "Page loaded, XHR interceptor injected: $url")
+                    }
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        val url = request?.url?.toString() ?: return false
+                        // Keep navigation within the ANTS site
+                        return if (url.contains("rendezvouspasseport.ants.gouv.fr") ||
+                            url.contains("captcha.liveidentity.com")) {
+                            false // Let WebView handle it
+                        } else {
+                            true // Block external navigations
                         }
                     }
                 }
 
                 webChromeClient = object : WebChromeClient() {
                     override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                        Log.d("CaptchaWebView", "JS: ${consoleMessage?.message()}")
+                        Log.d("CaptchaWebView", "JS Console: ${consoleMessage?.message()}")
                         return true
                     }
                 }
 
-                loadDataWithBaseURL(
-                    Constants.ANTS_WEB_URL,
-                    captchaHtml,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
+                // Load the real ANTS website
+                loadUrl(Constants.ANTS_WEB_URL)
             }
         },
         modifier = Modifier.fillMaxSize()
     )
 }
 
-private fun pollForToken(
-    webView: WebView?,
-    onTokenObtained: (String) -> Unit,
-    onStop: () -> Unit
+/**
+ * JavaScript interface that receives the captured JWT from the injected JS code.
+ */
+private class CaptchaJsBridge(
+    private val onJwtCaptured: (String) -> Unit
 ) {
-    webView ?: return
-
-    val jsCode = """
-        (function() {
-            var el = document.getElementById('li-antibot-desktop-token');
-            if (el && el.value && el.value.length > 10) {
-                return el.value;
-            }
-            return '';
-        })();
-    """.trimIndent()
-
-    webView.evaluateJavascript(jsCode) { result ->
-        val token = result?.trim()?.removeSurrounding("\"") ?: ""
-        if (token.isNotEmpty() && token.length > 10) {
-            Log.d("CaptchaWebView", "Captcha token obtained: ${token.take(20)}...")
-            onStop()
-            onTokenObtained(token)
-        } else {
-            // Poll again after 1 second
-            webView.postDelayed({
-                pollForToken(webView, onTokenObtained, onStop)
-            }, 1000)
+    @JavascriptInterface
+    fun onCaptchaJwt(jwt: String) {
+        Log.d("CaptchaJsBridge", "Captcha JWT captured: ${jwt.take(30)}...")
+        if (jwt.isNotEmpty()) {
+            onJwtCaptured(jwt)
         }
     }
 }
 
-private fun buildCaptchaHtml(antibotId: String, requestId: String): String {
+/**
+ * Build JavaScript code that intercepts XHR requests to capture the
+ * initCaptchaJWT response containing the captcha JWT.
+ *
+ * The ANTS Angular app makes a POST to /api/initCaptchaJWT which returns
+ * {"access_token": "..."}.  We hook into XMLHttpRequest.prototype.open
+ * and XMLHttpRequest.prototype.send to monitor responses.
+ *
+ * We also hook into fetch() as a fallback in case Angular uses fetch.
+ */
+private fun buildInterceptorJs(): String {
     return """
-    <!DOCTYPE html>
-    <html lang="fr">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Verification</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                margin: 0;
-                padding: 16px;
-                background: #f5f5f5;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
+    (function() {
+        if (window.__captchaInterceptorInstalled) return;
+        window.__captchaInterceptorInstalled = true;
+
+        console.log('[PassportSlot] Installing captcha JWT interceptor');
+
+        // Hook XMLHttpRequest
+        var origOpen = XMLHttpRequest.prototype.open;
+        var origSend = XMLHttpRequest.prototype.send;
+
+        XMLHttpRequest.prototype.open = function(method, url) {
+            this._captchaUrl = url;
+            this._captchaMethod = method;
+            return origOpen.apply(this, arguments);
+        };
+
+        XMLHttpRequest.prototype.send = function() {
+            var self = this;
+            if (self._captchaUrl && self._captchaUrl.indexOf('initCaptchaJWT') !== -1) {
+                var origOnLoad = self.onload;
+                var origOnReadyStateChange = self.onreadystatechange;
+
+                function tryCapture() {
+                    if (self.readyState === 4 && self.status === 200) {
+                        try {
+                            var data = JSON.parse(self.responseText);
+                            if (data && data.access_token) {
+                                console.log('[PassportSlot] Captured captcha JWT from initCaptchaJWT');
+                                AndroidBridge.onCaptchaJwt(data.access_token);
+                            }
+                        } catch(e) {
+                            console.log('[PassportSlot] Failed to parse initCaptchaJWT response: ' + e);
+                        }
+                    }
+                }
+
+                self.onreadystatechange = function() {
+                    tryCapture();
+                    if (origOnReadyStateChange) {
+                        origOnReadyStateChange.apply(self, arguments);
+                    }
+                };
+
+                self.onload = function() {
+                    tryCapture();
+                    if (origOnLoad) {
+                        origOnLoad.apply(self, arguments);
+                    }
+                };
             }
-            h3 {
-                color: #000091;
-                margin-bottom: 8px;
-            }
-            p {
-                color: #666;
-                font-size: 14px;
-                margin-bottom: 24px;
-                text-align: center;
-            }
-            #li-antibot-desktop {
-                width: 100%;
-                max-width: 400px;
-                min-height: 200px;
-            }
-            input[type="hidden"] {
-                display: none;
-            }
-        </style>
-    </head>
-    <body>
-        <h3>Verification de securite</h3>
-        <p>Veuillez resoudre le captcha ci-dessous pour continuer</p>
-        <div id="li-antibot-desktop"></div>
-        <input type="hidden" id="li-antibot-desktop-token" value="">
-        
-        <script src="${Constants.LIVE_IDENTITY_SCRIPT_URL}"></script>
-        <script>
-            try {
-                LI_ANTIBOT.loadAntibot({
-                    antibotId: "$antibotId",
-                    requestId: "$requestId",
-                    spKey: "${Constants.LIVE_IDENTITY_SP_KEY}",
-                    cookie: true,
-                    principalCaptcha: "QUESTION",
-                    alternativeCaptcha: "AUDIO",
-                    url: "${Constants.LIVE_IDENTITY_URL}/captcha",
-                    locale: "fr"
-                }, 'li-antibot-desktop');
-            } catch(e) {
-                document.body.innerHTML += '<p style="color:red">Erreur: ' + e.message + '</p>';
-            }
-        </script>
-    </body>
-    </html>
+            return origSend.apply(this, arguments);
+        };
+
+        // Hook fetch() as fallback
+        var origFetch = window.fetch;
+        if (origFetch) {
+            window.fetch = function(input, init) {
+                var url = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                var promise = origFetch.apply(this, arguments);
+
+                if (url.indexOf('initCaptchaJWT') !== -1) {
+                    promise.then(function(response) {
+                        return response.clone().text().then(function(text) {
+                            try {
+                                var data = JSON.parse(text);
+                                if (data && data.access_token) {
+                                    console.log('[PassportSlot] Captured captcha JWT from fetch initCaptchaJWT');
+                                    AndroidBridge.onCaptchaJwt(data.access_token);
+                                }
+                            } catch(e) {
+                                console.log('[PassportSlot] Failed to parse fetch initCaptchaJWT response: ' + e);
+                            }
+                        });
+                    });
+                }
+
+                return promise;
+            };
+        }
+
+        console.log('[PassportSlot] Captcha JWT interceptor installed successfully');
+    })();
     """.trimIndent()
 }
