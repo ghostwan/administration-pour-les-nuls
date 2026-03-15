@@ -123,7 +123,7 @@ fun SettingsScreen(
             // About section
             item {
                 Spacer(modifier = Modifier.height(16.dp))
-                Divider()
+                HorizontalDivider()
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = "A propos",

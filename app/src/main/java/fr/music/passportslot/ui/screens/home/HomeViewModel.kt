@@ -163,14 +163,14 @@ class HomeViewModel @Inject constructor(
                             }
                         }
                         is SlotSearchResult.Completed -> {
-                            val state = _uiState.value
+                            val currentState = _uiState.value
                             _uiState.update {
                                 it.copy(
                                     isSearching = false,
-                                    searchProgress = if (state.foundSlots.isEmpty())
-                                        "Aucun créneau disponible (${state.meetingPointsChecked} mairies vérifiées)"
+                                    searchProgress = if (currentState.foundSlots.isEmpty())
+                                        "Aucun créneau disponible (${currentState.meetingPointsChecked} mairies vérifiées)"
                                     else
-                                        "${state.foundSlots.size} créneau(x) trouvé(s) dans ${state.meetingPointsChecked} mairies"
+                                        "${currentState.foundSlots.size} créneau(x) trouvé(s) dans ${currentState.meetingPointsChecked} mairies"
                                 )
                             }
                         }

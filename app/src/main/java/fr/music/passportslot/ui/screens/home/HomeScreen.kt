@@ -356,7 +356,7 @@ private fun AddressSearchSection(
                                 }
                             }
                         }
-                        Divider()
+                        HorizontalDivider()
                     }
                 }
             }
