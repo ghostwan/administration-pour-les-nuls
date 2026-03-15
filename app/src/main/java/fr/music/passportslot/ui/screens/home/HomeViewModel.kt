@@ -59,6 +59,7 @@ class HomeViewModel @Inject constructor(
 
     private var searchJob: Job? = null
     private var suggestionJob: Job? = null
+    private var captchaRetryCount = 0
 
     init {
         // Restore last search parameters
@@ -260,12 +261,24 @@ class HomeViewModel @Inject constructor(
                             }
                         }
                         is SlotSearchResult.CaptchaRequired -> {
-                            _uiState.update {
-                                it.copy(
-                                    isSearching = false,
-                                    captchaRequired = true,
-                                    searchProgress = "Captcha requis - veuillez le resoudre"
-                                )
+                            if (captchaRetryCount > 0) {
+                                // Already tried after captcha was skipped — don't loop
+                                _uiState.update {
+                                    it.copy(
+                                        isSearching = false,
+                                        captchaRequired = false,
+                                        errorMessage = "Le serveur demande un captcha. Veuillez réessayer."
+                                    )
+                                }
+                                captchaRetryCount = 0
+                            } else {
+                                _uiState.update {
+                                    it.copy(
+                                        isSearching = false,
+                                        captchaRequired = true,
+                                        searchProgress = "Captcha requis - veuillez le résoudre"
+                                    )
+                                }
                             }
                         }
                     }
@@ -340,19 +353,18 @@ class HomeViewModel @Inject constructor(
 
     fun onCaptchaCompleted() {
         _uiState.update { it.copy(captchaRequired = false) }
+        captchaRetryCount = 0
         // Auto-retry the search after captcha is solved
         searchSlots()
     }
 
     fun onCaptchaSkipped() {
-        // Captcha was not needed on the ANTS site — don't auto-retry
-        // since our own WebSocket would loop back to captcha again
-        _uiState.update {
-            it.copy(
-                captchaRequired = false,
-                searchProgress = "Le captcha n'a pas été demandé. Réessayez la recherche."
-            )
-        }
+        // Captcha was not needed on the ANTS site — retry the search
+        // without captcha token. If the server still demands it, we'll
+        // stop instead of looping.
+        _uiState.update { it.copy(captchaRequired = false) }
+        captchaRetryCount++
+        searchSlots()
     }
 
     fun dismissCaptchaRequired() {
