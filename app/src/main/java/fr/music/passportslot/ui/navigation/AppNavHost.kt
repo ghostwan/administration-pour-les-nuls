@@ -21,8 +21,8 @@ fun AppNavHost(
     ) {
         composable(Screen.Home.route) { backStackEntry ->
             // Check if returning from captcha screen with success
-            val captchaResult = backStackEntry.savedStateHandle
-                .get<String>("captcha_result")
+            val captchaCompleted = backStackEntry.savedStateHandle
+                .get<Boolean>("captcha_completed") == true
 
             HomeScreen(
                 onNavigateToResults = {
@@ -34,13 +34,13 @@ fun AppNavHost(
                 onNavigateToCaptcha = {
                     navController.navigate(Screen.Captcha.route)
                 },
-                captchaResult = captchaResult
+                captchaJustCompleted = captchaCompleted
             )
 
             // Clear the flag after reading it
-            LaunchedEffect(captchaResult) {
-                if (captchaResult != null) {
-                    backStackEntry.savedStateHandle.remove<String>("captcha_result")
+            LaunchedEffect(captchaCompleted) {
+                if (captchaCompleted) {
+                    backStackEntry.savedStateHandle.remove<Boolean>("captcha_completed")
                 }
             }
         }
@@ -63,13 +63,11 @@ fun AppNavHost(
 
         composable(Screen.Captcha.route) {
             CaptchaScreen(
-                onCaptchaCompleted = { hasCaptchaJwt ->
-                    // "solved" = a real captcha JWT was captured, safe to auto-retry
-                    // "skipped" = no captcha was needed, don't auto-retry
-                    val result = if (hasCaptchaJwt) "solved" else "skipped"
+                onCaptchaCompleted = {
+                    // Pop back to home and set a flag for auto-retry
                     navController.previousBackStackEntry
                         ?.savedStateHandle
-                        ?.set("captcha_result", result)
+                        ?.set("captcha_completed", true)
                     navController.popBackStack()
                 },
                 onNavigateBack = {
