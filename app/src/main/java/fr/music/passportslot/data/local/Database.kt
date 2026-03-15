@@ -78,6 +78,9 @@ interface FoundSlotDao {
     @Query("UPDATE found_slots SET dismissed = 1 WHERE id = :id")
     suspend fun dismiss(id: Long)
 
+    @Query("UPDATE found_slots SET dismissed = 1 WHERE dismissed = 0")
+    suspend fun dismissAll()
+
     @Query("DELETE FROM found_slots WHERE foundAt < :cutoff")
     suspend fun deleteOlderThan(cutoff: Long)
 

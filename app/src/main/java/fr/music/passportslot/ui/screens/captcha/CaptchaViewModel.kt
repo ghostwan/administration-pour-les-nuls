@@ -13,16 +13,19 @@ data class CaptchaUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isProcessingToken: Boolean = false,
-    val captchaSuccess: Boolean = false
+    val captchaSuccess: Boolean = false,
+    val captchaNotRequired: Boolean = false,
+    val captchaDetected: Boolean = false,
+    val pageLoaded: Boolean = false
 )
 
 /**
  * ViewModel for the CaptchaScreen.
  *
- * With the new approach (loading the real ANTS website), the ViewModel's
- * role is simpler: it receives the captcha JWT captured by the JavaScript
- * interceptor from the real ANTS site's initCaptchaJWT call, validates it,
- * and stores it in CaptchaManager.
+ * Handles three scenarios:
+ * 1. Captcha JWT captured from the real ANTS site's initCaptchaJWT call → validate, store, navigate back
+ * 2. WebSocket search detected (captcha not required) → auto-navigate back for retry
+ * 3. Captcha widget visible → update UI to inform user
  */
 @HiltViewModel
 class CaptchaViewModel @Inject constructor(
@@ -84,6 +87,32 @@ class CaptchaViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Called when the JS interceptor detects the ANTS site creating a search
+     * WebSocket. This means captcha was not required — navigate back so the
+     * HomeScreen can retry the search without captcha.
+     */
+    fun onWebSocketDetected() {
+        Log.d(TAG, "WebSocket detected - captcha not required, navigating back")
+        _uiState.update { it.copy(captchaNotRequired = true) }
+    }
+
+    /**
+     * Called when the JS interceptor detects the LiveIdentity captcha widget
+     * is visible in the DOM. Updates the UI to inform the user.
+     */
+    fun onCaptchaWidgetDetected() {
+        Log.d(TAG, "Captcha widget detected in DOM")
+        _uiState.update { it.copy(captchaDetected = true) }
+    }
+
+    /**
+     * Called when the ANTS page finishes loading.
+     */
+    fun onPageLoaded() {
+        _uiState.update { it.copy(pageLoaded = true) }
     }
 
     fun retry() {

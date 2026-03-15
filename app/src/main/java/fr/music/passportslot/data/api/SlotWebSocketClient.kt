@@ -98,13 +98,13 @@ class SlotWebSocketClient @Inject constructor(
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closing: $code $reason")
                 webSocket.close(WS_CLOSE_NORMAL, null)
-                trySend(SlotSearchResult.Completed)
+                trySend(SlotSearchResult.Completed())
                 close()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closed: $code $reason")
-                trySend(SlotSearchResult.Completed)
+                trySend(SlotSearchResult.Completed())
                 close()
             }
 
@@ -212,7 +212,7 @@ class SlotWebSocketClient @Inject constructor(
             val editorsNumber = jsonObject.get("editors_number")?.asInt ?: 0
             val errorCount = jsonObject.get("editor_errors_number")?.asInt ?: 0
             Log.d(TAG, "Search complete: $editorsNumber editors checked, $errorCount errors")
-            trySend(SlotSearchResult.Completed)
+            trySend(SlotSearchResult.Completed(editorsChecked = editorsNumber, editorsErrors = errorCount))
             return
         }
 
@@ -264,7 +264,10 @@ sealed class SlotSearchResult {
         val city: String,
         val distanceKm: Double
     ) : SlotSearchResult()
-    data object Completed : SlotSearchResult()
+    data class Completed(
+        val editorsChecked: Int = 0,
+        val editorsErrors: Int = 0
+    ) : SlotSearchResult()
     data object CaptchaRequired : SlotSearchResult()
     data class Error(val message: String) : SlotSearchResult()
 }

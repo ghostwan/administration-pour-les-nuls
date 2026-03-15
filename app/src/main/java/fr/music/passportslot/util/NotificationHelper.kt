@@ -24,6 +24,7 @@ class NotificationHelper @Inject constructor(
     companion object {
         private const val NOTIFICATION_GROUP = "slot_alerts_group"
         private const val SUMMARY_NOTIFICATION_ID = 0
+        private const val CAPTCHA_NOTIFICATION_ID = 2000
     }
 
     /**
@@ -138,6 +139,45 @@ class NotificationHelper @Inject constructor(
             } catch (e: SecurityException) {
                 // Permission not granted
             }
+        }
+    }
+
+    /**
+     * Show a notification when captcha is required.
+     * The user needs to open the app to solve the captcha so background monitoring can continue.
+     */
+    fun showCaptchaRequiredNotification() {
+        val notificationManager = NotificationManagerCompat.from(context)
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("open_captcha", true)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context, 1, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Captcha requis")
+            .setContentText("Ouvrez l'application pour résoudre le captcha et reprendre la surveillance")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(
+                        "Le captcha a expiré. Ouvrez l'application et résolvez le captcha " +
+                        "pour que la surveillance en arrière-plan puisse continuer à chercher des créneaux."
+                    )
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        try {
+            notificationManager.notify(CAPTCHA_NOTIFICATION_ID, notification)
+        } catch (e: SecurityException) {
+            // Permission not granted
         }
     }
 

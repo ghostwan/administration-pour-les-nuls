@@ -6,6 +6,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.*
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import fr.music.passportslot.data.api.CaptchaManager
 import fr.music.passportslot.data.api.SlotSearchResult
 import fr.music.passportslot.data.local.AppDatabase
 import fr.music.passportslot.data.model.FoundSlot
@@ -19,12 +20,16 @@ import java.util.concurrent.TimeUnit
 /**
  * Background worker that periodically checks for available appointment slots.
  * Uses WorkManager for reliable background execution.
+ *
+ * Handles captcha expiration by notifying the user to open the app.
+ * Uses exponential backoff on transient failures.
  */
 @HiltWorker
 class SlotCheckWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
     private val slotRepository: SlotRepository,
+    private val captchaManager: CaptchaManager,
     private val notificationHelper: NotificationHelper,
     private val database: AppDatabase
 ) : CoroutineWorker(appContext, workerParams) {
@@ -106,6 +111,8 @@ class SlotCheckWorker @AssistedInject constructor(
 
         var totalNewSlots = 0
         val allNewSlots = mutableListOf<FoundSlot>()
+        var captchaNeeded = false
+        var hasTransientError = false
 
         for (config in configs) {
             Log.d(TAG, "Checking config ${config.id}: ${config.address}")
@@ -145,9 +152,16 @@ class SlotCheckWorker @AssistedInject constructor(
                             }
                             is SlotSearchResult.Error -> {
                                 Log.e(TAG, "Error for config ${config.id}: ${result.message}")
+                                if (result.message.contains("Token expire", ignoreCase = true) ||
+                                    result.message.contains("connexion", ignoreCase = true) ||
+                                    result.message.contains("timeout", ignoreCase = true)
+                                ) {
+                                    hasTransientError = true
+                                }
                             }
                             is SlotSearchResult.CaptchaRequired -> {
-                                Log.w(TAG, "Captcha required for config ${config.id} - skipping (needs user interaction)")
+                                Log.w(TAG, "Captcha required for config ${config.id}")
+                                captchaNeeded = true
                             }
                             else -> { /* ignore other states */ }
                         }
@@ -155,6 +169,7 @@ class SlotCheckWorker @AssistedInject constructor(
                     .collect()
             } catch (e: Exception) {
                 Log.e(TAG, "Exception checking config ${config.id}", e)
+                hasTransientError = true
             }
         }
 
@@ -166,6 +181,18 @@ class SlotCheckWorker @AssistedInject constructor(
             Log.d(TAG, "No new slots found")
         }
 
-        return Result.success()
+        // Notify user if captcha is needed (they need to open the app)
+        if (captchaNeeded) {
+            Log.d(TAG, "Captcha needed - notifying user to open app")
+            notificationHelper.showCaptchaRequiredNotification()
+        }
+
+        // Use retry for transient errors (exponential backoff)
+        return if (hasTransientError && allNewSlots.isEmpty()) {
+            Log.d(TAG, "Transient error occurred, requesting retry with backoff")
+            Result.retry()
+        } else {
+            Result.success()
+        }
     }
 }

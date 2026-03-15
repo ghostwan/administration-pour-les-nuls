@@ -3,6 +3,7 @@ package fr.music.passportslot.ui.screens.captcha
 import android.annotation.SuppressLint
 import android.util.Log
 import android.webkit.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -10,10 +11,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import fr.music.passportslot.util.Constants
+import kotlinx.coroutines.delay
 
 /**
  * Screen that loads the real ANTS website in a WebView so the user can solve
@@ -22,6 +25,9 @@ import fr.music.passportslot.util.Constants
  * We inject JavaScript to intercept the XHR response from initCaptchaJWT,
  * which contains the captcha JWT. Once captured, we store it in our
  * CaptchaManager and navigate back.
+ *
+ * If the ANTS site creates a WebSocket search without showing a captcha,
+ * we detect this and auto-navigate back (captcha was not required after all).
  *
  * This approach avoids LiveIdentity bot detection that occurs when loading
  * custom HTML pages in a WebView.
@@ -35,11 +41,26 @@ fun CaptchaScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Navigate back on success
+    // Navigate back on success (JWT captured or captcha not needed)
     LaunchedEffect(uiState.captchaSuccess) {
         if (uiState.captchaSuccess) {
             onCaptchaCompleted()
         }
+    }
+
+    // Navigate back when captcha was detected as not required
+    LaunchedEffect(uiState.captchaNotRequired) {
+        if (uiState.captchaNotRequired) {
+            onNavigateBack()
+        }
+    }
+
+    // Status message for the info bar
+    val statusMessage = when {
+        uiState.isProcessingToken -> "Validation du captcha en cours..."
+        uiState.captchaDetected -> "Captcha detecte - veuillez le resoudre ci-dessous"
+        uiState.pageLoaded -> "Naviguez sur le site pour declencher le captcha"
+        else -> "Chargement du site ANTS..."
     }
 
     Scaffold(
@@ -60,79 +81,118 @@ fun CaptchaScreen(
             )
         }
     ) { paddingValues ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            when {
-                uiState.error != null -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+            // Status info bar
+            Surface(
+                color = when {
+                    uiState.isProcessingToken -> MaterialTheme.colorScheme.primaryContainer
+                    uiState.captchaDetected -> MaterialTheme.colorScheme.tertiaryContainer
+                    else -> MaterialTheme.colorScheme.surfaceVariant
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (uiState.isProcessingToken || !uiState.pageLoaded) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else if (uiState.captchaDetected) {
                         Icon(
-                            Icons.Default.Error,
+                            Icons.Default.Security,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = uiState.error ?: "",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error
+                    } else {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { viewModel.retry() }) {
-                            Text("Reessayer")
-                        }
                     }
-                }
-                else -> {
-                    // Show the real ANTS website in a WebView
-                    AntsWebView(
-                        onCaptchaJwtCaptured = { jwt ->
-                            viewModel.onCaptchaJwtCaptured(jwt)
-                        }
+                    Text(
+                        text = statusMessage,
+                        style = MaterialTheme.typography.bodySmall
                     )
+                }
+            }
 
-                    // Loading indicator overlay
-                    if (uiState.isLoading) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+            // Main content
+            Box(modifier = Modifier.weight(1f)) {
+                when {
+                    uiState.error != null -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            Card {
-                                Column(
-                                    modifier = Modifier.padding(24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    CircularProgressIndicator()
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("Chargement du site ANTS...")
-                                }
+                            Icon(
+                                Icons.Default.Error,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = uiState.error ?: "",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(onClick = { viewModel.retry() }) {
+                                Text("Reessayer")
                             }
                         }
                     }
+                    else -> {
+                        // Show the real ANTS website in a WebView
+                        AntsWebView(
+                            onCaptchaJwtCaptured = { jwt ->
+                                viewModel.onCaptchaJwtCaptured(jwt)
+                            },
+                            onWebSocketDetected = {
+                                viewModel.onWebSocketDetected()
+                            },
+                            onCaptchaWidgetDetected = {
+                                viewModel.onCaptchaWidgetDetected()
+                            },
+                            onPageLoaded = {
+                                viewModel.onPageLoaded()
+                            }
+                        )
 
-                    // Show processing overlay when validating JWT
-                    if (uiState.isProcessingToken) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Card {
-                                Column(
-                                    modifier = Modifier.padding(24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                        // Show processing overlay when validating JWT
+                        if (uiState.isProcessingToken) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Card(
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                                 ) {
-                                    CircularProgressIndicator()
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("Validation du captcha...")
+                                    Column(
+                                        modifier = Modifier.padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        CircularProgressIndicator()
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text("Validation du captcha...")
+                                    }
                                 }
                             }
                         }
@@ -146,16 +206,39 @@ fun CaptchaScreen(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun AntsWebView(
-    onCaptchaJwtCaptured: (String) -> Unit
+    onCaptchaJwtCaptured: (String) -> Unit,
+    onWebSocketDetected: () -> Unit,
+    onCaptchaWidgetDetected: () -> Unit,
+    onPageLoaded: () -> Unit
 ) {
     // Track whether we already captured a JWT to avoid double-firing
     var jwtCaptured by remember { mutableStateOf(false) }
+    var wsDetected by remember { mutableStateOf(false) }
+    var captchaDetected by remember { mutableStateOf(false) }
 
     val safeCaptureCallback: (String) -> Unit = remember {
         { jwt: String ->
             if (!jwtCaptured) {
                 jwtCaptured = true
                 onCaptchaJwtCaptured(jwt)
+            }
+        }
+    }
+
+    val safeWsCallback: () -> Unit = remember {
+        {
+            if (!wsDetected) {
+                wsDetected = true
+                onWebSocketDetected()
+            }
+        }
+    }
+
+    val safeCaptchaDetectedCallback: () -> Unit = remember {
+        {
+            if (!captchaDetected) {
+                captchaDetected = true
+                onCaptchaWidgetDetected()
             }
         }
     }
@@ -178,7 +261,11 @@ private fun AntsWebView(
 
                 // Add JavaScript interface to receive the JWT from injected JS
                 addJavascriptInterface(
-                    CaptchaJsBridge(safeCaptureCallback),
+                    CaptchaJsBridge(
+                        onJwtCaptured = safeCaptureCallback,
+                        onWebSocketDetected = safeWsCallback,
+                        onCaptchaWidgetDetected = safeCaptchaDetectedCallback
+                    ),
                     "AndroidBridge"
                 )
 
@@ -194,6 +281,7 @@ private fun AntsWebView(
                         super.onPageFinished(view, url)
                         // Re-inject in case the early injection was too early
                         view?.evaluateJavascript(buildInterceptorJs(), null)
+                        onPageLoaded()
                         Log.d("CaptchaWebView", "Page finished, XHR interceptor re-injected: $url")
                     }
 
@@ -228,10 +316,12 @@ private fun AntsWebView(
 }
 
 /**
- * JavaScript interface that receives the captured JWT from the injected JS code.
+ * JavaScript interface that receives events from the injected JS code.
  */
 private class CaptchaJsBridge(
-    private val onJwtCaptured: (String) -> Unit
+    private val onJwtCaptured: (String) -> Unit,
+    private val onWebSocketDetected: () -> Unit,
+    private val onCaptchaWidgetDetected: () -> Unit
 ) {
     @JavascriptInterface
     fun onCaptchaJwt(jwt: String) {
@@ -239,6 +329,18 @@ private class CaptchaJsBridge(
         if (jwt.isNotEmpty()) {
             onJwtCaptured(jwt)
         }
+    }
+
+    @JavascriptInterface
+    fun onWebSocketCreated() {
+        Log.d("CaptchaJsBridge", "ANTS WebSocket search detected - captcha may not be needed")
+        onWebSocketDetected()
+    }
+
+    @JavascriptInterface
+    fun onCaptchaWidgetVisible() {
+        Log.d("CaptchaJsBridge", "LiveIdentity captcha widget detected in DOM")
+        onCaptchaWidgetDetected()
     }
 }
 
@@ -250,9 +352,8 @@ private class CaptchaJsBridge(
  * 1. Hook XMLHttpRequest.prototype.open/send with addEventListener('load')
  *    (Angular HttpClient uses addEventListener, NOT onload/onreadystatechange)
  * 2. Hook fetch() as fallback
- * 3. Poll for WebSocket messages containing antibot_token in localStorage/sessionStorage
- * 4. Monitor the Angular app's HTTP traffic by hooking XMLHttpRequest at the
- *    prototype level before Angular bootstraps
+ * 3. Hook WebSocket constructor to detect when search starts (captcha not needed)
+ * 4. Poll DOM for LiveIdentity captcha widget visibility
  *
  * The script is idempotent (safe to inject multiple times).
  */
@@ -262,8 +363,10 @@ private fun buildInterceptorJs(): String {
         if (window.__captchaInterceptorInstalled) return;
         window.__captchaInterceptorInstalled = true;
         window.__captchaJwtCaptured = false;
+        window.__wsNotified = false;
+        window.__captchaWidgetNotified = false;
 
-        console.log('[PassportSlot] Installing captcha JWT interceptor v2');
+        console.log('[PassportSlot] Installing captcha JWT interceptor v3');
 
         function reportJwt(jwt) {
             if (window.__captchaJwtCaptured) return;
@@ -274,6 +377,28 @@ private fun buildInterceptorJs(): String {
                 AndroidBridge.onCaptchaJwt(jwt);
             } catch(e) {
                 console.log('[PassportSlot] Failed to call AndroidBridge: ' + e);
+            }
+        }
+
+        function reportWebSocket() {
+            if (window.__wsNotified) return;
+            window.__wsNotified = true;
+            console.log('[PassportSlot] Notifying Android of WebSocket creation');
+            try {
+                AndroidBridge.onWebSocketCreated();
+            } catch(e) {
+                console.log('[PassportSlot] Failed to call AndroidBridge.onWebSocketCreated: ' + e);
+            }
+        }
+
+        function reportCaptchaWidget() {
+            if (window.__captchaWidgetNotified) return;
+            window.__captchaWidgetNotified = true;
+            console.log('[PassportSlot] Notifying Android of captcha widget');
+            try {
+                AndroidBridge.onCaptchaWidgetVisible();
+            } catch(e) {
+                console.log('[PassportSlot] Failed to call AndroidBridge.onCaptchaWidgetVisible: ' + e);
             }
         }
 
@@ -372,13 +497,14 @@ private fun buildInterceptorJs(): String {
         }
 
         // === Strategy 3: Hook WebSocket constructor ===
-        // Log when the ANTS site creates a search WebSocket (for diagnostics).
-        // If this fires without a captcha, it means captcha was not required.
+        // Detect when the ANTS site creates a search WebSocket.
+        // If this fires, it means the search started without needing captcha.
         var OrigWebSocket = window.WebSocket;
         window.WebSocket = function(url, protocols) {
             console.log('[PassportSlot] WebSocket created: ' + url);
             if (url && url.indexOf('SlotsFromPositionStreaming') !== -1) {
                 console.log('[PassportSlot] ANTS search WebSocket detected — captcha passed or not needed');
+                reportWebSocket();
             }
             if (protocols !== undefined) {
                 return new OrigWebSocket(url, protocols);
@@ -391,9 +517,7 @@ private fun buildInterceptorJs(): String {
         window.WebSocket.CLOSING = OrigWebSocket.CLOSING;
         window.WebSocket.CLOSED = OrigWebSocket.CLOSED;
 
-        // === Strategy 3: Periodic polling of Angular app state ===
-        // The Angular app may store the token in memory. We can try to
-        // find it by checking for known DOM elements or global variables.
+        // === Strategy 4: Poll for captcha widget and localStorage tokens ===
         var pollCount = 0;
         var maxPolls = 300; // 5 minutes at 1s intervals
         var pollInterval = setInterval(function() {
@@ -403,33 +527,35 @@ private fun buildInterceptorJs(): String {
             }
             pollCount++;
 
-            // Check if Angular stored a token we can grab
-            // The ANTS app uses localStorage sometimes
+            // Check for the LiveIdentity captcha widget in the DOM
             try {
-                var keys = Object.keys(localStorage);
-                for (var i = 0; i < keys.length; i++) {
-                    var val = localStorage.getItem(keys[i]);
-                    if (val && val.indexOf('eyJ') === 0 && val.length > 50) {
-                        // Looks like a JWT
-                        console.log('[PassportSlot] Found potential JWT in localStorage key: ' + keys[i]);
-                        // Don't auto-report localStorage JWTs - they might be auth tokens
+                var captchaContainer = document.querySelector('.li-antibot-container, #li-antibot-desktop, [class*="antibot"]');
+                if (captchaContainer) {
+                    var rect = captchaContainer.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        reportCaptchaWidget();
                     }
+                }
+                // Also check for iframe-based captcha
+                var captchaIframe = document.querySelector('iframe[src*="liveidentity"], iframe[src*="captcha"]');
+                if (captchaIframe) {
+                    reportCaptchaWidget();
                 }
             } catch(e) {}
 
-            // Check for the captcha token input that LiveIdentity creates
+            // Check if Angular stored a token we can grab
             try {
-                var tokenEl = document.getElementById('li-antibot-desktop-token');
-                if (tokenEl && tokenEl.value && tokenEl.value.length > 20 &&
-                    tokenEl.value.indexOf('Blacklisted') === -1) {
-                    console.log('[PassportSlot] LiveIdentity token field has value (len=' + tokenEl.value.length + ')');
-                    // Don't report this - it's the raw captcha token, not the JWT.
-                    // But log it so we know the captcha was solved.
+                var keys = Object.keys(localStorage);
+                for (var i = 0; i < keys.length; i++) {
+                    var val2 = localStorage.getItem(keys[i]);
+                    if (val2 && val2.indexOf('eyJ') === 0 && val2.length > 50) {
+                        console.log('[PassportSlot] Found potential JWT in localStorage key: ' + keys[i]);
+                    }
                 }
             } catch(e) {}
         }, 1000);
 
-        console.log('[PassportSlot] Captcha JWT interceptor v2 installed');
+        console.log('[PassportSlot] Captcha JWT interceptor v3 installed');
     })();
     """.trimIndent()
 }

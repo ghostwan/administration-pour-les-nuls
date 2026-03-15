@@ -1,5 +1,7 @@
 package fr.music.passportslot.ui.screens.home
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -39,6 +42,7 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Auto-retry search after captcha is completed
     LaunchedEffect(captchaJustCompleted) {
@@ -55,7 +59,19 @@ fun HomeScreen(
         }
     }
 
+    // Show snackbar messages
+    LaunchedEffect(uiState.snackbarMessage) {
+        uiState.snackbarMessage?.let { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short
+            )
+            viewModel.dismissSnackbar()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -67,6 +83,7 @@ fun HomeScreen(
                 ),
                 actions = {
                     IconButton(onClick = onNavigateToResults) {
+                        @Suppress("DEPRECATION")
                         Icon(
                             Icons.Default.List,
                             contentDescription = "Resultats",
@@ -186,38 +203,15 @@ fun HomeScreen(
                 }
             }
 
-            // Progress message
+            // Search progress card
             if (uiState.searchProgress.isNotEmpty()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (uiState.isSearching) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Text(
-                            text = uiState.searchProgress,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
+                SearchProgressCard(
+                    progress = uiState.searchProgress,
+                    isSearching = uiState.isSearching,
+                    meetingPointsChecked = uiState.meetingPointsChecked,
+                    totalEditors = uiState.totalEditors,
+                    slotsFound = uiState.foundSlots.size
+                )
             }
 
             // Error message
@@ -257,6 +251,117 @@ fun HomeScreen(
                     slots = uiState.foundSlots,
                     onViewAll = onNavigateToResults
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchProgressCard(
+    progress: String,
+    isSearching: Boolean,
+    meetingPointsChecked: Int,
+    totalEditors: Int,
+    slotsFound: Int
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (slotsFound > 0 && !isSearching)
+                GreenSuccess.copy(alpha = 0.1f)
+            else
+                MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (isSearching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else if (slotsFound > 0) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = GreenSuccess,
+                        modifier = Modifier.size(16.dp)
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Text(
+                    text = progress,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+
+            // Progress bar during search
+            if (isSearching && meetingPointsChecked > 0) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Summary stats row
+            if (meetingPointsChecked > 0 || slotsFound > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (meetingPointsChecked > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Business,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = if (totalEditors > 0 && !isSearching) "$meetingPointsChecked/$totalEditors mairies"
+                                       else "$meetingPointsChecked mairies",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (slotsFound > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.EventAvailable,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = GreenSuccess
+                            )
+                            Text(
+                                text = "$slotsFound creneau(x)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GreenSuccess,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -502,6 +607,7 @@ private fun SlotsPreview(
             )
             TextButton(onClick = onViewAll) {
                 Text("Voir tout")
+                @Suppress("DEPRECATION")
                 Icon(Icons.Default.ArrowForward, contentDescription = null)
             }
         }
@@ -525,48 +631,74 @@ private fun SlotsPreview(
 
 @Composable
 private fun SlotCard(slot: Slot) {
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = GreenSuccess.copy(alpha = 0.08f)
         )
     ) {
-        Row(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(12.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = slot.meetingPointName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "${slot.city} (${slot.zipCode})",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = slot.meetingPointName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${slot.city} (${slot.zipCode})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = formatDate(slot.date),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GreenSuccess
+                    )
+                    Text(
+                        text = slot.time,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = GreenSuccess
+                    )
+                    Text(
+                        text = "${String.format("%.1f", slot.distanceKm)} km",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = formatDate(slot.date),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = GreenSuccess
-                )
-                Text(
-                    text = slot.time,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = GreenSuccess
-                )
-                Text(
-                    text = "${String.format("%.1f", slot.distanceKm)} km",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+
+            // Quick booking button
+            slot.appointmentUrl?.let { url ->
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.align(Alignment.End),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    @Suppress("DEPRECATION")
+                    Icon(
+                        Icons.Default.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Prendre RDV", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }

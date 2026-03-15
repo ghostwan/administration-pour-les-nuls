@@ -26,10 +26,12 @@ data class HomeUiState(
     val searchProgress: String = "",
     val foundSlots: List<Slot> = emptyList(),
     val meetingPointsChecked: Int = 0,
+    val totalEditors: Int = 0,
     val errorMessage: String? = null,
     val isMonitoringActive: Boolean = false,
     val showSuggestions: Boolean = false,
-    val captchaRequired: Boolean = false
+    val captchaRequired: Boolean = false,
+    val snackbarMessage: String? = null
 )
 
 @HiltViewModel
@@ -171,6 +173,10 @@ class HomeViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    fun dismissSnackbar() {
+        _uiState.update { it.copy(snackbarMessage = null) }
+    }
+
     fun hideSuggestions() {
         _uiState.update { it.copy(showSuggestions = false) }
     }
@@ -183,13 +189,13 @@ class HomeViewModel @Inject constructor(
         val selectedAddress = state.selectedAddress
 
         if (selectedAddress == null) {
-            _uiState.update { it.copy(errorMessage = "Veuillez sélectionner une adresse") }
+            _uiState.update { it.copy(errorMessage = "Veuillez selectionner une adresse") }
             return
         }
 
         val coords = selectedAddress.geometry.coordinates
         if (coords.size < 2) {
-            _uiState.update { it.copy(errorMessage = "Coordonnées invalides") }
+            _uiState.update { it.copy(errorMessage = "Coordonnees invalides") }
             return
         }
 
@@ -202,7 +208,8 @@ class HomeViewModel @Inject constructor(
                 isSearching = true,
                 foundSlots = emptyList(),
                 meetingPointsChecked = 0,
-                searchProgress = "Connexion...",
+                totalEditors = 0,
+                searchProgress = "Connexion au serveur...",
                 errorMessage = null
             )
         }
@@ -221,33 +228,41 @@ class HomeViewModel @Inject constructor(
                 .onEach { result ->
                     when (result) {
                         is SlotSearchResult.Connected -> {
-                            _uiState.update { it.copy(searchProgress = "Recherche en cours...") }
+                            _uiState.update { it.copy(searchProgress = "Connecte - recherche en cours...") }
                         }
                         is SlotSearchResult.SlotsFound -> {
                             _uiState.update { current ->
+                                val newTotal = current.foundSlots.size + result.slots.size
                                 current.copy(
                                     foundSlots = current.foundSlots + result.slots,
-                                    searchProgress = "${current.foundSlots.size + result.slots.size} créneau(x) trouvé(s)"
+                                    searchProgress = "$newTotal creneau(x) trouve(s) - recherche en cours..."
                                 )
                             }
                         }
                         is SlotSearchResult.MeetingPointNoSlots -> {
                             _uiState.update { current ->
+                                val newCount = current.meetingPointsChecked + 1
                                 current.copy(
-                                    meetingPointsChecked = current.meetingPointsChecked + 1,
-                                    searchProgress = "${current.meetingPointsChecked + 1} mairie(s) vérifiée(s) - ${result.name}"
+                                    meetingPointsChecked = newCount,
+                                    searchProgress = "$newCount mairie(s) verifiee(s) - ${result.name}"
                                 )
                             }
                         }
                         is SlotSearchResult.Completed -> {
                             val currentState = _uiState.value
+                            val totalEditors = if (result.editorsChecked > 0) result.editorsChecked else currentState.meetingPointsChecked
                             _uiState.update {
                                 it.copy(
                                     isSearching = false,
+                                    totalEditors = totalEditors,
                                     searchProgress = if (currentState.foundSlots.isEmpty())
-                                        "Aucun créneau disponible (${currentState.meetingPointsChecked} mairies vérifiées)"
+                                        "Aucun creneau disponible ($totalEditors mairies verifiees)"
                                     else
-                                        "${currentState.foundSlots.size} créneau(x) trouvé(s) dans ${currentState.meetingPointsChecked} mairies"
+                                        "${currentState.foundSlots.size} creneau(x) trouve(s) dans $totalEditors mairies",
+                                    snackbarMessage = if (currentState.foundSlots.isEmpty())
+                                        "Recherche terminee - aucun creneau disponible"
+                                    else
+                                        "${currentState.foundSlots.size} creneau(x) disponible(s) !"
                                 )
                             }
                         }
@@ -264,7 +279,7 @@ class HomeViewModel @Inject constructor(
                                 it.copy(
                                     isSearching = false,
                                     captchaRequired = true,
-                                    searchProgress = "Captcha requis - veuillez le résoudre"
+                                    searchProgress = "Captcha requis - veuillez le resoudre"
                                 )
                             }
                         }
@@ -290,7 +305,7 @@ class HomeViewModel @Inject constructor(
         val selectedAddress = state.selectedAddress
 
         if (selectedAddress == null) {
-            _uiState.update { it.copy(errorMessage = "Veuillez sélectionner une adresse") }
+            _uiState.update { it.copy(errorMessage = "Veuillez selectionner une adresse") }
             return
         }
 
@@ -311,7 +326,12 @@ class HomeViewModel @Inject constructor(
 
             slotRepository.saveSearchConfig(config)
             SlotCheckWorker.schedule(getApplication())
-            _uiState.update { it.copy(isMonitoringActive = true) }
+            _uiState.update {
+                it.copy(
+                    isMonitoringActive = true,
+                    snackbarMessage = "Surveillance activee pour ${state.addressQuery}"
+                )
+            }
         }
     }
 
@@ -324,7 +344,12 @@ class HomeViewModel @Inject constructor(
                 slotRepository.updateSearchConfig(config.copy(isActive = false))
             }
             SlotCheckWorker.cancel(getApplication())
-            _uiState.update { it.copy(isMonitoringActive = false) }
+            _uiState.update {
+                it.copy(
+                    isMonitoringActive = false,
+                    snackbarMessage = "Surveillance desactivee"
+                )
+            }
         }
     }
 
@@ -333,7 +358,7 @@ class HomeViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 isSearching = false,
-                searchProgress = "Recherche annulée"
+                searchProgress = "Recherche annulee"
             )
         }
     }

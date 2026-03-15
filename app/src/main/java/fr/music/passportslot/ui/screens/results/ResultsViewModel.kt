@@ -41,4 +41,10 @@ class ResultsViewModel @Inject constructor(
             database.foundSlotDao().dismiss(id)
         }
     }
+
+    fun dismissAll() {
+        viewModelScope.launch {
+            database.foundSlotDao().dismissAll()
+        }
+    }
 }
