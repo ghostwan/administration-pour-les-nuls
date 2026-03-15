@@ -13,7 +13,8 @@ data class CaptchaUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val isProcessingToken: Boolean = false,
-    val captchaSuccess: Boolean = false
+    val captchaSuccess: Boolean = false,
+    val hasCaptchaJwt: Boolean = false
 )
 
 /**
@@ -54,7 +55,8 @@ class CaptchaViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isProcessingToken = false,
-                            captchaSuccess = true
+                            captchaSuccess = true,
+                            hasCaptchaJwt = true
                         )
                     }
                 } else {
@@ -66,7 +68,8 @@ class CaptchaViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isProcessingToken = false,
-                            captchaSuccess = true
+                            captchaSuccess = true,
+                            hasCaptchaJwt = true
                         )
                     }
                 }
@@ -79,7 +82,8 @@ class CaptchaViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isProcessingToken = false,
-                        captchaSuccess = true
+                        captchaSuccess = true,
+                        hasCaptchaJwt = true
                     )
                 }
             }

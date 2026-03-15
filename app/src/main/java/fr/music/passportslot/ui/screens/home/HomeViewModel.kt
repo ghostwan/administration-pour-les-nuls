@@ -344,6 +344,17 @@ class HomeViewModel @Inject constructor(
         searchSlots()
     }
 
+    fun onCaptchaSkipped() {
+        // Captcha was not needed on the ANTS site — don't auto-retry
+        // since our own WebSocket would loop back to captcha again
+        _uiState.update {
+            it.copy(
+                captchaRequired = false,
+                searchProgress = "Le captcha n'a pas été demandé. Réessayez la recherche."
+            )
+        }
+    }
+
     fun dismissCaptchaRequired() {
         _uiState.update { it.copy(captchaRequired = false) }
     }

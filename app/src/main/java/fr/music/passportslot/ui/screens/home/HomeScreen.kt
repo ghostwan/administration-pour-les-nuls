@@ -34,16 +34,24 @@ fun HomeScreen(
     onNavigateToResults: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToCaptcha: () -> Unit,
-    captchaJustCompleted: Boolean = false,
+    captchaResult: String? = null,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
 
-    // Auto-retry search after captcha is completed
-    LaunchedEffect(captchaJustCompleted) {
-        if (captchaJustCompleted) {
-            viewModel.onCaptchaCompleted()
+    // Handle return from captcha screen
+    LaunchedEffect(captchaResult) {
+        when (captchaResult) {
+            "solved" -> {
+                // Real captcha JWT was captured, safe to auto-retry
+                viewModel.onCaptchaCompleted()
+            }
+            "skipped" -> {
+                // No captcha was needed on the ANTS site, don't auto-retry
+                // (would cause infinite loop since our own WebSocket may still demand captcha)
+                viewModel.onCaptchaSkipped()
+            }
         }
     }
 

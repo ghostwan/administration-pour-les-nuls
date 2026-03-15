@@ -29,7 +29,7 @@ import fr.music.passportslot.util.Constants
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CaptchaScreen(
-    onCaptchaCompleted: () -> Unit,
+    onCaptchaCompleted: (hasCaptchaJwt: Boolean) -> Unit,
     onNavigateBack: () -> Unit,
     viewModel: CaptchaViewModel = hiltViewModel()
 ) {
@@ -38,7 +38,7 @@ fun CaptchaScreen(
     // Navigate back on success
     LaunchedEffect(uiState.captchaSuccess) {
         if (uiState.captchaSuccess) {
-            onCaptchaCompleted()
+            onCaptchaCompleted(uiState.hasCaptchaJwt)
         }
     }
 
