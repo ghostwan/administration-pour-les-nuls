@@ -97,6 +97,9 @@ fun CaptchaScreen(
                     AntsWebView(
                         onCaptchaJwtCaptured = { jwt ->
                             viewModel.onCaptchaJwtCaptured(jwt)
+                        },
+                        onSearchStartedWithoutCaptcha = { authToken ->
+                            viewModel.onSearchStartedWithoutCaptcha(authToken)
                         }
                     )
 
@@ -146,7 +149,8 @@ fun CaptchaScreen(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun AntsWebView(
-    onCaptchaJwtCaptured: (String) -> Unit
+    onCaptchaJwtCaptured: (String) -> Unit,
+    onSearchStartedWithoutCaptcha: (String) -> Unit
 ) {
     // Track whether we already captured a JWT to avoid double-firing
     var jwtCaptured by remember { mutableStateOf(false) }
@@ -156,6 +160,15 @@ private fun AntsWebView(
             if (!jwtCaptured) {
                 jwtCaptured = true
                 onCaptchaJwtCaptured(jwt)
+            }
+        }
+    }
+
+    val safeSearchCallback: (String) -> Unit = remember {
+        { token: String ->
+            if (!jwtCaptured) {
+                jwtCaptured = true
+                onSearchStartedWithoutCaptcha(token)
             }
         }
     }
@@ -178,7 +191,7 @@ private fun AntsWebView(
 
                 // Add JavaScript interface to receive the JWT from injected JS
                 addJavascriptInterface(
-                    CaptchaJsBridge(safeCaptureCallback),
+                    CaptchaJsBridge(safeCaptureCallback, safeSearchCallback),
                     "AndroidBridge"
                 )
 
@@ -228,10 +241,12 @@ private fun AntsWebView(
 }
 
 /**
- * JavaScript interface that receives the captured JWT from the injected JS code.
+ * JavaScript interface that receives the captured JWT from the injected JS code,
+ * or a signal that the ANTS site started a WebSocket search (captcha not needed).
  */
 private class CaptchaJsBridge(
-    private val onJwtCaptured: (String) -> Unit
+    private val onJwtCaptured: (String) -> Unit,
+    private val onSearchStartedWithoutCaptcha: (String) -> Unit
 ) {
     @JavascriptInterface
     fun onCaptchaJwt(jwt: String) {
@@ -239,6 +254,12 @@ private class CaptchaJsBridge(
         if (jwt.isNotEmpty()) {
             onJwtCaptured(jwt)
         }
+    }
+
+    @JavascriptInterface
+    fun onSearchStarted(authToken: String) {
+        Log.d("CaptchaJsBridge", "ANTS site started search (no captcha needed), auth token: ${authToken.take(30)}...")
+        onSearchStartedWithoutCaptcha(authToken)
     }
 }
 
@@ -370,6 +391,35 @@ private fun buildInterceptorJs(): String {
                 return promise;
             };
         }
+
+        // === Strategy 3: Hook WebSocket constructor ===
+        // If the ANTS site creates a WebSocket to SlotsFromPositionStreaming,
+        // it means the captcha is done (or was not needed). Extract the auth
+        // token from the WebSocket URL and report it.
+        var OrigWebSocket = window.WebSocket;
+        window.WebSocket = function(url, protocols) {
+            console.log('[PassportSlot] WebSocket created: ' + url);
+            if (url && url.indexOf('SlotsFromPositionStreaming') !== -1) {
+                console.log('[PassportSlot] ANTS search WebSocket detected — captcha passed or not needed');
+                // Extract token from URL: ...?token=<auth_token>
+                var tokenMatch = url.match(/[?&]token=([^&]+)/);
+                var authToken = tokenMatch ? tokenMatch[1] : '';
+                try {
+                    AndroidBridge.onSearchStarted(authToken);
+                } catch(e) {
+                    console.log('[PassportSlot] Failed to call AndroidBridge.onSearchStarted: ' + e);
+                }
+            }
+            if (protocols !== undefined) {
+                return new OrigWebSocket(url, protocols);
+            }
+            return new OrigWebSocket(url);
+        };
+        window.WebSocket.prototype = OrigWebSocket.prototype;
+        window.WebSocket.CONNECTING = OrigWebSocket.CONNECTING;
+        window.WebSocket.OPEN = OrigWebSocket.OPEN;
+        window.WebSocket.CLOSING = OrigWebSocket.CLOSING;
+        window.WebSocket.CLOSED = OrigWebSocket.CLOSED;
 
         // === Strategy 3: Periodic polling of Angular app state ===
         // The Angular app may store the token in memory. We can try to

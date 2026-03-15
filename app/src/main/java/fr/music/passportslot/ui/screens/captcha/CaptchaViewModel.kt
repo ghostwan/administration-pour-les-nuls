@@ -86,6 +86,26 @@ class CaptchaViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Called when the JS interceptor detects that the ANTS site started a
+     * WebSocket search (SlotsFromPositionStreaming), meaning the captcha was
+     * either solved silently or was not required at all.
+     *
+     * We don't have a captcha JWT in this case, but we know the ANTS site
+     * let the search through. Navigate back so the user can retry with our
+     * own WebSocket — it may also work without captcha now.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun onSearchStartedWithoutCaptcha(authToken: String) {
+        Log.d(TAG, "ANTS site started search without captcha, navigating back")
+        _uiState.update {
+            it.copy(
+                isProcessingToken = false,
+                captchaSuccess = true
+            )
+        }
+    }
+
     fun retry() {
         captchaManager.invalidateJwt()
         _uiState.update { CaptchaUiState() }
