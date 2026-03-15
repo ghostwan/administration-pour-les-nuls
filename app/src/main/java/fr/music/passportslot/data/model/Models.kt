@@ -123,6 +123,34 @@ data class SlotDetail(
 )
 
 /**
+ * Meeting point object as received in WebSocket array messages.
+ * Format: [{"id": "2064", "name": "Hotel de ville", "longitude": ..., "available_slots": [...]}]
+ *
+ * Field names differ from SlotStreamResponse (which used meeting_point_id, meeting_point_name).
+ */
+data class WsMeetingPoint(
+    val id: String? = null,
+    val name: String? = null,
+    @SerializedName("city_name")
+    val cityName: String? = null,
+    @SerializedName("zip_code")
+    val zipCode: String? = null,
+    @SerializedName("public_entry_address")
+    val publicEntryAddress: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    @SerializedName("distance_km")
+    val distanceKm: Double? = null,
+    val editor: String? = null,
+    val phone: String? = null,
+    val website: String? = null,
+    @SerializedName("appointment_url")
+    val appointmentUrl: String? = null,
+    @SerializedName("available_slots")
+    val availableSlots: List<SlotDetail>? = null
+)
+
+/**
  * Auth token response.
  */
 data class TokenResponse(

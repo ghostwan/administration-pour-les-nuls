@@ -2,9 +2,12 @@ package fr.music.passportslot.data.api
 
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonParser
+import com.google.gson.reflect.TypeToken
 import fr.music.passportslot.data.model.Slot
 import fr.music.passportslot.data.model.SlotSearchRequest
 import fr.music.passportslot.data.model.SlotStreamResponse
+import fr.music.passportslot.data.model.WsMeetingPoint
 import fr.music.passportslot.util.Constants
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
@@ -18,6 +21,11 @@ import javax.inject.Singleton
 /**
  * WebSocket client for streaming slot availability from the ANTS API.
  * Primary method for finding available appointment slots.
+ *
+ * The WebSocket sends three types of messages:
+ * 1. JSON object {...} - status/error messages (e.g. captcha required, end_of_search)
+ * 2. JSON array [{...}, ...] - batch of meeting points, each may contain available slots
+ * 3. Empty JSON array [] - no data for this batch
  */
 @Singleton
 class SlotWebSocketClient @Inject constructor(
@@ -27,7 +35,7 @@ class SlotWebSocketClient @Inject constructor(
     companion object {
         private const val TAG = "SlotWebSocketClient"
         private const val WS_CLOSE_NORMAL = 1000
-        private const val WS_TIMEOUT_SECONDS = 60L
+        private const val WS_TIMEOUT_SECONDS = 120L
     }
 
     private val client = OkHttpClient.Builder()
@@ -39,7 +47,7 @@ class SlotWebSocketClient @Inject constructor(
 
     /**
      * Search for available slots via WebSocket streaming.
-     * Returns a Flow of Slot objects as they are received.
+     * Returns a Flow of SlotSearchResult as they are received.
      */
     fun searchSlots(request: SlotSearchRequest): Flow<SlotSearchResult> = callbackFlow {
         val token = try {
@@ -61,61 +69,26 @@ class SlotWebSocketClient @Inject constructor(
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket connected, sending search request")
                 val requestJson = gson.toJson(request)
+                Log.d(TAG, "Request: $requestJson")
                 webSocket.send(requestJson)
                 trySend(SlotSearchResult.Connected)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "WebSocket message received: ${text.take(200)}")
+                Log.d(TAG, "WebSocket message (${text.length} chars): ${text.take(300)}")
                 try {
-                    val response = gson.fromJson(text, SlotStreamResponse::class.java)
+                    val jsonElement = JsonParser.parseString(text)
 
-                    // Check for errors
-                    if (response.liStatus == "error") {
-                        Log.w(TAG, "WebSocket error: ${response.liMessage}")
-                        val message = response.liMessage ?: "Erreur inconnue"
-                        if (message.contains("Token expire", ignoreCase = true)) {
-                            authManager.invalidateToken()
-                            trySend(SlotSearchResult.Error("Token expiré, veuillez réessayer"))
-                        } else if (message.contains("captcha", ignoreCase = true)) {
-                            trySend(SlotSearchResult.CaptchaRequired)
-                        } else {
-                            trySend(SlotSearchResult.Error(message))
+                    when {
+                        jsonElement.isJsonArray -> {
+                            handleArrayMessage(jsonElement.asJsonArray, trySend = { trySend(it) })
                         }
-                        return
-                    }
-
-                    // Parse meeting point with slots
-                    if (response.meetingPointId != null && !response.slots.isNullOrEmpty()) {
-                        val slots = response.slots.mapNotNull { detail ->
-                            if (detail.date != null && detail.time != null) {
-                                Slot(
-                                    date = detail.date,
-                                    time = detail.time,
-                                    datetime = detail.datetime ?: "${detail.date}T${detail.time}",
-                                    meetingPointId = response.meetingPointId,
-                                    meetingPointName = response.meetingPointName ?: "Inconnu",
-                                    city = response.city ?: "",
-                                    zipCode = response.zipCode ?: "",
-                                    distanceKm = response.distanceKm ?: 0.0,
-                                    appointmentUrl = response.appointmentUrl
-                                )
-                            } else null
+                        jsonElement.isJsonObject -> {
+                            handleObjectMessage(jsonElement.asJsonObject, trySend = { trySend(it) })
                         }
-                        if (slots.isNotEmpty()) {
-                            trySend(SlotSearchResult.SlotsFound(slots))
+                        else -> {
+                            Log.w(TAG, "Unexpected JSON type: ${jsonElement.javaClass.simpleName}")
                         }
-                    }
-
-                    // Check for end signal (meeting point with empty or no slots = just info)
-                    if (response.meetingPointId != null && response.slots.isNullOrEmpty()) {
-                        trySend(
-                            SlotSearchResult.MeetingPointNoSlots(
-                                name = response.meetingPointName ?: "Inconnu",
-                                city = response.city ?: "",
-                                distanceKm = response.distanceKm ?: 0.0
-                            )
-                        )
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse WebSocket message", e)
@@ -152,6 +125,130 @@ class SlotWebSocketClient @Inject constructor(
         awaitClose {
             timeoutJob.cancel()
             webSocket.close(WS_CLOSE_NORMAL, "Flow cancelled")
+        }
+    }
+
+    /**
+     * Handle a JSON array message from the WebSocket.
+     * Each element is a meeting point that may contain available slots.
+     */
+    private fun handleArrayMessage(
+        jsonArray: com.google.gson.JsonArray,
+        trySend: (SlotSearchResult) -> Unit
+    ) {
+        if (jsonArray.size() == 0) {
+            // Empty array - no meeting points in this batch
+            return
+        }
+
+        val meetingPointListType = object : TypeToken<List<WsMeetingPoint>>() {}.type
+        val meetingPoints: List<WsMeetingPoint> = gson.fromJson(jsonArray, meetingPointListType)
+
+        for (mp in meetingPoints) {
+            val mpName = mp.name ?: "Inconnu"
+            val mpCity = mp.cityName ?: ""
+            val mpZip = mp.zipCode ?: ""
+            val mpId = mp.id ?: ""
+            val mpDistance = mp.distanceKm ?: 0.0
+            val mpUrl = mp.appointmentUrl ?: mp.website
+
+            if (!mp.availableSlots.isNullOrEmpty()) {
+                // This meeting point has available slots
+                val slots = mp.availableSlots.mapNotNull { slotData ->
+                    val date = slotData.date ?: return@mapNotNull null
+                    val time = slotData.time ?: return@mapNotNull null
+                    Slot(
+                        date = date,
+                        time = time,
+                        datetime = slotData.datetime ?: "${date}T${time}",
+                        meetingPointId = mpId,
+                        meetingPointName = mpName,
+                        city = mpCity,
+                        zipCode = mpZip,
+                        distanceKm = mpDistance,
+                        appointmentUrl = mpUrl
+                    )
+                }
+                if (slots.isNotEmpty()) {
+                    Log.d(TAG, "Found ${slots.size} slot(s) at $mpName ($mpCity)")
+                    trySend(SlotSearchResult.SlotsFound(slots))
+                } else {
+                    trySend(SlotSearchResult.MeetingPointNoSlots(mpName, mpCity, mpDistance))
+                }
+            } else {
+                // Meeting point with no available slots
+                trySend(SlotSearchResult.MeetingPointNoSlots(mpName, mpCity, mpDistance))
+            }
+        }
+    }
+
+    /**
+     * Handle a JSON object message from the WebSocket.
+     * Could be an error, status update, or end_of_search signal.
+     */
+    private fun handleObjectMessage(
+        jsonObject: com.google.gson.JsonObject,
+        trySend: (SlotSearchResult) -> Unit
+    ) {
+        // Check for error messages
+        val liStatus = jsonObject.get("li_status")?.asString
+        if (liStatus == "error") {
+            val message = jsonObject.get("li_message")?.asString ?: "Erreur inconnue"
+            Log.w(TAG, "WebSocket error: $message")
+            if (message.contains("Token expire", ignoreCase = true)) {
+                authManager.invalidateToken()
+                trySend(SlotSearchResult.Error("Token expiré, veuillez réessayer"))
+            } else if (message.contains("captcha", ignoreCase = true)) {
+                trySend(SlotSearchResult.CaptchaRequired)
+            } else {
+                trySend(SlotSearchResult.Error(message))
+            }
+            return
+        }
+
+        // Check for end_of_search
+        val step = jsonObject.get("step")?.asString
+        if (step == "end_of_search") {
+            val editorsNumber = jsonObject.get("editors_number")?.asInt ?: 0
+            val errorCount = jsonObject.get("editor_errors_number")?.asInt ?: 0
+            Log.d(TAG, "Search complete: $editorsNumber editors checked, $errorCount errors")
+            trySend(SlotSearchResult.Completed)
+            return
+        }
+
+        // Try parsing as a single meeting point response (legacy format)
+        try {
+            val response = gson.fromJson(jsonObject, SlotStreamResponse::class.java)
+            if (response.meetingPointId != null && !response.slots.isNullOrEmpty()) {
+                val slots = response.slots.mapNotNull { detail ->
+                    if (detail.date != null && detail.time != null) {
+                        Slot(
+                            date = detail.date,
+                            time = detail.time,
+                            datetime = detail.datetime ?: "${detail.date}T${detail.time}",
+                            meetingPointId = response.meetingPointId,
+                            meetingPointName = response.meetingPointName ?: "Inconnu",
+                            city = response.city ?: "",
+                            zipCode = response.zipCode ?: "",
+                            distanceKm = response.distanceKm ?: 0.0,
+                            appointmentUrl = response.appointmentUrl
+                        )
+                    } else null
+                }
+                if (slots.isNotEmpty()) {
+                    trySend(SlotSearchResult.SlotsFound(slots))
+                }
+            } else if (response.meetingPointId != null) {
+                trySend(
+                    SlotSearchResult.MeetingPointNoSlots(
+                        name = response.meetingPointName ?: "Inconnu",
+                        city = response.city ?: "",
+                        distanceKm = response.distanceKm ?: 0.0
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unrecognized object message: ${jsonObject.toString().take(200)}")
         }
     }
 }
