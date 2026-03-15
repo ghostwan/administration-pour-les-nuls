@@ -51,10 +51,9 @@ fun HomeScreen(
         }
     }
 
-    // Navigate to captcha when required
-    LaunchedEffect(uiState.captchaRequired) {
-        if (uiState.captchaRequired) {
-            viewModel.dismissCaptchaRequired()
+    // Navigate to captcha when required (one-shot event, no race condition)
+    LaunchedEffect(Unit) {
+        viewModel.captchaRequiredEvent.collect {
             onNavigateToCaptcha()
         }
     }

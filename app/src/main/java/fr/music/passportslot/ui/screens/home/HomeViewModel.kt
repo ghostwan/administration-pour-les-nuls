@@ -11,6 +11,7 @@ import fr.music.passportslot.data.repository.GeocodingRepository
 import fr.music.passportslot.data.repository.SlotRepository
 import fr.music.passportslot.worker.SlotCheckWorker
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -30,7 +31,6 @@ data class HomeUiState(
     val errorMessage: String? = null,
     val isMonitoringActive: Boolean = false,
     val showSuggestions: Boolean = false,
-    val captchaRequired: Boolean = false,
     val snackbarMessage: String? = null
 )
 
@@ -58,6 +58,10 @@ class HomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    // One-shot event channel for captcha navigation (avoids LaunchedEffect key race condition)
+    private val _captchaRequiredEvent = Channel<Unit>(Channel.BUFFERED)
+    val captchaRequiredEvent: Flow<Unit> = _captchaRequiredEvent.receiveAsFlow()
 
     private var searchJob: Job? = null
     private var suggestionJob: Job? = null
@@ -278,10 +282,10 @@ class HomeViewModel @Inject constructor(
                             _uiState.update {
                                 it.copy(
                                     isSearching = false,
-                                    captchaRequired = true,
                                     searchProgress = "Captcha requis - veuillez le resoudre"
                                 )
                             }
+                            _captchaRequiredEvent.send(Unit)
                         }
                     }
                 }
@@ -364,13 +368,8 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onCaptchaCompleted() {
-        _uiState.update { it.copy(captchaRequired = false) }
         // Auto-retry the search after captcha is solved
         searchSlots()
-    }
-
-    fun dismissCaptchaRequired() {
-        _uiState.update { it.copy(captchaRequired = false) }
     }
 
     override fun onCleared() {
