@@ -73,11 +73,14 @@ class SlotWebSocketClient @Inject constructor(
                     // Check for errors
                     if (response.liStatus == "error") {
                         Log.w(TAG, "WebSocket error: ${response.liMessage}")
-                        if (response.liMessage?.contains("Token expire", ignoreCase = true) == true) {
+                        val message = response.liMessage ?: "Erreur inconnue"
+                        if (message.contains("Token expire", ignoreCase = true)) {
                             authManager.invalidateToken()
                             trySend(SlotSearchResult.Error("Token expiré, veuillez réessayer"))
+                        } else if (message.contains("captcha", ignoreCase = true)) {
+                            trySend(SlotSearchResult.CaptchaRequired)
                         } else {
-                            trySend(SlotSearchResult.Error(response.liMessage ?: "Erreur inconnue"))
+                            trySend(SlotSearchResult.Error(message))
                         }
                         return
                     }
@@ -165,5 +168,6 @@ sealed class SlotSearchResult {
         val distanceKm: Double
     ) : SlotSearchResult()
     data object Completed : SlotSearchResult()
+    data object CaptchaRequired : SlotSearchResult()
     data class Error(val message: String) : SlotSearchResult()
 }

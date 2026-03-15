@@ -1,7 +1,11 @@
 package fr.music.passportslot.data.api
 
+import fr.music.passportslot.data.model.AntibotInfoResponse
+import fr.music.passportslot.data.model.CaptchaJwtResponse
 import fr.music.passportslot.data.model.GeocodingResponse
 import fr.music.passportslot.data.model.TokenResponse
+import okhttp3.ResponseBody
+import retrofit2.Response
 import retrofit2.http.*
 
 /**
@@ -40,6 +44,28 @@ interface AntsApiService {
     suspend fun getStatus(
         @Header("Authorization") authHeader: String
     ): Any
+
+    /**
+     * Step 1 of captcha flow: get antibot info (antibotId + requestId).
+     */
+    @POST("send_antibot_info")
+    suspend fun sendAntibotInfo(
+        @Header("ANTIBOT-ID") antibotId: String? = null
+    ): AntibotInfoResponse
+
+    /**
+     * Step 2 of captcha flow: exchange solved captcha for a JWT.
+     */
+    @POST("initCaptchaJWT")
+    suspend fun initCaptchaJwt(): CaptchaJwtResponse
+
+    /**
+     * Step 3 of captcha flow: validate the captcha JWT.
+     */
+    @GET("validateCaptchaJWT")
+    suspend fun validateCaptchaJwt(
+        @Query("token") token: String
+    ): Response<ResponseBody>
 }
 
 /**

@@ -15,7 +15,8 @@ import javax.inject.Inject
 data class SettingsUiState(
     val activeConfigs: List<SearchConfig> = emptyList(),
     val checkIntervalMinutes: Int = 15,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val showSavedMessage: Boolean = false
 )
 
 @HiltViewModel
@@ -42,7 +43,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun updateCheckInterval(minutes: Int) {
+    fun saveCheckInterval(minutes: Int) {
         _uiState.update { it.copy(checkIntervalMinutes = minutes) }
         viewModelScope.launch {
             val configs = database.searchConfigDao().getActiveConfigsList()
@@ -52,7 +53,12 @@ class SettingsViewModel @Inject constructor(
             if (configs.isNotEmpty()) {
                 SlotCheckWorker.schedule(getApplication(), minutes.toLong())
             }
+            _uiState.update { it.copy(showSavedMessage = true) }
         }
+    }
+
+    fun dismissSavedMessage() {
+        _uiState.update { it.copy(showSavedMessage = false) }
     }
 
     fun deleteConfig(config: SearchConfig) {

@@ -34,4 +34,9 @@ object Constants {
 
     // DataStore
     const val DATASTORE_NAME = "settings"
+
+    // LiveIdentity Captcha
+    const val LIVE_IDENTITY_URL = "https://captcha.liveidentity.com"
+    const val LIVE_IDENTITY_SP_KEY = "]>(Jx8U>GqQ>"
+    const val LIVE_IDENTITY_SCRIPT_URL = "$LIVE_IDENTITY_URL/captcha/public/antibot.min.v4-latest.js"
 }

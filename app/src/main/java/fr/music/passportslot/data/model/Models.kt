@@ -84,7 +84,9 @@ data class SlotSearchRequest(
     @SerializedName("documents_number")
     val documentsNumber: Int,
     val address: String = "",
-    val absoluteSearch: String = ""
+    val absoluteSearch: String = "",
+    @SerializedName("antibot_token")
+    val antibotToken: String = ""
 )
 
 /**
@@ -169,4 +171,22 @@ data class FoundSlot(
     val foundAt: Long = System.currentTimeMillis(),
     val notified: Boolean = false,
     val dismissed: Boolean = false
+)
+
+/**
+ * Response from POST /api/send_antibot_info
+ */
+data class AntibotInfoResponse(
+    @SerializedName("antibotId")
+    val antibotId: String,
+    @SerializedName("requestId")
+    val requestId: String
+)
+
+/**
+ * Response from POST /api/initCaptchaJWT
+ */
+data class CaptchaJwtResponse(
+    @SerializedName("access_token")
+    val accessToken: String
 )

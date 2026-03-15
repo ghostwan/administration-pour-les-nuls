@@ -33,10 +33,27 @@ import fr.music.passportslot.ui.theme.GreenSuccess
 fun HomeScreen(
     onNavigateToResults: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToCaptcha: () -> Unit,
+    captchaJustCompleted: Boolean = false,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
+
+    // Auto-retry search after captcha is completed
+    LaunchedEffect(captchaJustCompleted) {
+        if (captchaJustCompleted) {
+            viewModel.onCaptchaCompleted()
+        }
+    }
+
+    // Navigate to captcha when required
+    LaunchedEffect(uiState.captchaRequired) {
+        if (uiState.captchaRequired) {
+            viewModel.dismissCaptchaRequired()
+            onNavigateToCaptcha()
+        }
+    }
 
     Scaffold(
         topBar = {

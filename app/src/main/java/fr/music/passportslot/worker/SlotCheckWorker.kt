@@ -146,6 +146,9 @@ class SlotCheckWorker @AssistedInject constructor(
                             is SlotSearchResult.Error -> {
                                 Log.e(TAG, "Error for config ${config.id}: ${result.message}")
                             }
+                            is SlotSearchResult.CaptchaRequired -> {
+                                Log.w(TAG, "Captcha required for config ${config.id} - skipping (needs user interaction)")
+                            }
                             else -> { /* ignore other states */ }
                         }
                     }

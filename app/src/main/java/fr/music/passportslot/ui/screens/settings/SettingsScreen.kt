@@ -21,8 +21,20 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.showSavedMessage) {
+        if (uiState.showSavedMessage) {
+            snackbarHostState.showSnackbar(
+                message = "Parametres sauvegardes",
+                duration = SnackbarDuration.Short
+            )
+            viewModel.dismissSavedMessage()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Parametres") },
@@ -50,7 +62,7 @@ fun SettingsScreen(
             item {
                 CheckIntervalSection(
                     intervalMinutes = uiState.checkIntervalMinutes,
-                    onIntervalChanged = { viewModel.updateCheckInterval(it) }
+                    onIntervalSaved = { viewModel.saveCheckInterval(it) }
                 )
             }
 
@@ -152,8 +164,15 @@ fun SettingsScreen(
 @Composable
 private fun CheckIntervalSection(
     intervalMinutes: Int,
-    onIntervalChanged: (Int) -> Unit
+    onIntervalSaved: (Int) -> Unit
 ) {
+    var sliderValue by remember { mutableFloatStateOf(intervalMinutes.toFloat()) }
+
+    // Sync with external state when it changes (e.g. on first load)
+    LaunchedEffect(intervalMinutes) {
+        sliderValue = intervalMinutes.toFloat()
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -167,14 +186,15 @@ private fun CheckIntervalSection(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Toutes les $intervalMinutes minutes",
+                text = "Toutes les ${sliderValue.toInt()} minutes",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(8.dp))
             Slider(
-                value = intervalMinutes.toFloat(),
-                onValueChange = { onIntervalChanged(it.toInt()) },
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { onIntervalSaved(sliderValue.toInt()) },
                 valueRange = 5f..60f,
                 steps = 10,
                 modifier = Modifier.fillMaxWidth()

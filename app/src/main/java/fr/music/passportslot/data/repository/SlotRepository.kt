@@ -2,6 +2,7 @@ package fr.music.passportslot.data.repository
 
 import android.util.Log
 import fr.music.passportslot.data.api.AuthManager
+import fr.music.passportslot.data.api.CaptchaManager
 import fr.music.passportslot.data.api.SlotSearchResult
 import fr.music.passportslot.data.api.SlotWebSocketClient
 import fr.music.passportslot.data.local.AppDatabase
@@ -22,6 +23,7 @@ import javax.inject.Singleton
 class SlotRepository @Inject constructor(
     private val webSocketClient: SlotWebSocketClient,
     private val authManager: AuthManager,
+    private val captchaManager: CaptchaManager,
     private val database: AppDatabase
 ) {
     companion object {
@@ -36,6 +38,8 @@ class SlotRepository @Inject constructor(
         val endDate = today.plusMonths(Constants.DEFAULT_SEARCH_MONTHS_AHEAD.toLong())
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
+        val captchaJwt = captchaManager.getJwt() ?: ""
+
         val request = SlotSearchRequest(
             startDate = today.format(formatter),
             endDate = endDate.format(formatter),
@@ -44,10 +48,11 @@ class SlotRepository @Inject constructor(
             radiusKm = config.radiusKm,
             reason = config.reason.apiValue,
             documentsNumber = config.documentsNumber,
-            address = config.address
+            address = config.address,
+            antibotToken = captchaJwt
         )
 
-        Log.d(TAG, "Searching slots: lat=${config.latitude}, lon=${config.longitude}, radius=${config.radiusKm}km")
+        Log.d(TAG, "Searching slots: lat=${config.latitude}, lon=${config.longitude}, radius=${config.radiusKm}km, hasCaptcha=${captchaJwt.isNotEmpty()}")
         return webSocketClient.searchSlots(request)
     }
 

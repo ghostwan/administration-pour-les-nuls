@@ -27,7 +27,8 @@ data class HomeUiState(
     val meetingPointsChecked: Int = 0,
     val errorMessage: String? = null,
     val isMonitoringActive: Boolean = false,
-    val showSuggestions: Boolean = false
+    val showSuggestions: Boolean = false,
+    val captchaRequired: Boolean = false
 )
 
 @HiltViewModel
@@ -182,6 +183,15 @@ class HomeViewModel @Inject constructor(
                                 )
                             }
                         }
+                        is SlotSearchResult.CaptchaRequired -> {
+                            _uiState.update {
+                                it.copy(
+                                    isSearching = false,
+                                    captchaRequired = true,
+                                    searchProgress = "Captcha requis - veuillez le resoudre"
+                                )
+                            }
+                        }
                     }
                 }
                 .catch { e ->
@@ -250,6 +260,16 @@ class HomeViewModel @Inject constructor(
                 searchProgress = "Recherche annulée"
             )
         }
+    }
+
+    fun onCaptchaCompleted() {
+        _uiState.update { it.copy(captchaRequired = false) }
+        // Auto-retry the search after captcha is solved
+        searchSlots()
+    }
+
+    fun dismissCaptchaRequired() {
+        _uiState.update { it.copy(captchaRequired = false) }
     }
 
     override fun onCleared() {
